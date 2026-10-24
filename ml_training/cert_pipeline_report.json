@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-10-22T08:36:33.898174+00:00",
+  "dataset": {
+    "source": "cert_reference",
+    "provenance": "cert_r4.2_reference",
+    "total_events_loaded": 17332,
+    "events_evaluated_in_run": 300,
+    "unique_users_evaluated": 20
+  },
+  "streaming_infrastructure": {
+    "kafka": {
+      "online": false,
+      "status": "unavailable",
+      "bootstrap_servers": "localhost:9092",
+      "diagnostic": "Cannot connect to broker at localhost:9092: timed out",
+      "remedy": "Start Kafka container via docker-compose -f docker-compose.streaming.yml up -d kafka"
+    },
+    "spark": {
+      "online": false,
+      "status": "unavailable",
+      "engine": "Astra Streaming Stream Aggregator (Causal 1:1 Spark Parity)",
+      "diagnostic": "Apache Spark runtime offline (No module named 'pyspark')",
+      "remedy": "Start Spark Master/Worker containers via docker-compose -f docker-compose.streaming.yml up -d spark-master spark-worker"
+    }
+  },
+  "ml_inference": {
+    "model_mode": "trained",
+    "model_architecture": "Ensemble (XGBoost meta-learner over IF, AE, LSTM, GNN)",
+    "total_predictions_generated": 1195,
+    "total_alerts_generated": 210,
+    "calibrated_threshold": 0.85
+  },
+  "ground_truth_alignment": {
+    "ground_truth_scenarios_count": 3,
+    "detected_scenarios": [
+      1,
+      2,
+      3
+    ],
+    "incident_recall": 1.0,
+    "incident_recall_percentage": "100.0%",
+    "false_alerts_per_user_day": 0.38,
+    "target_incident_recall_met": true
+  },
+  "performance": {
+    "elapsed_seconds": 3.456,
+    "throughput_events_per_sec": 86.81,
+    "average_latency_ms": 11.52
+  },
+  "verdict": "PASS"
+}

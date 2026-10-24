@@ -1,0 +1,12 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+sqlalchemy==2.0.40
+psycopg[binary]==3.2.6
+kafka-python==2.2.15
+pydantic-settings==2.9.1
+PyJWT==2.10.1
+argon2-cffi==23.1.0
+httpx==0.28.1
+alembic==1.15.2
+redis==6.0.0
+pytest==8.3.5

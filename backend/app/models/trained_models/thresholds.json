@@ -1,0 +1,36 @@
+{
+  "autoencoder_p95": 0.118485,
+  "high_risk_threshold": 0.7,
+  "suspicious_threshold": 0.455,
+  "critical_threshold": 0.85,
+  "metrics": {
+    "IsolationForest_auc": 0.9995,
+    "Autoencoder_auc": 0.9756,
+    "LSTM_auc": 1.0,
+    "GNN_auc": 1.0,
+    "Ensemble_auc": 1.0,
+    "Ensemble_accuracy": 1.0,
+    "Ensemble_precision": 1.0,
+    "Ensemble_recall": 1.0,
+    "Ensemble_f1": 1.0,
+    "true_positives": 1019,
+    "false_positives": 0,
+    "true_negatives": 11981,
+    "false_negatives": 0
+  },
+  "IsolationForest_version": "trained-isoforest-v3.0",
+  "Autoencoder_version": "trained-ae-v3.0",
+  "LSTM_version": "trained-lstm-v3.0",
+  "GNN_version": "trained-gnn-v3.0",
+  "Ensemble_version": "trained-xgboost-ensemble-v3.0",
+  "features": [
+    "egress_mb",
+    "sensitive_files",
+    "off_hours",
+    "new_device",
+    "peer_deviation",
+    "baseline_egress",
+    "behavior_drift",
+    "session_count"
+  ]
+}

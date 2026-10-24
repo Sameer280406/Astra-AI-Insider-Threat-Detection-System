@@ -1,0 +1,9 @@
+FROM apache/spark:3.5.0
+
+USER root
+RUN mkdir -p /var/lib/astra/spark-checkpoints \
+    && chown -R 185:185 /var/lib/astra
+COPY --chown=185:185 services/spark_streaming.py /opt/astra/spark_streaming.py
+USER 185:185
+
+ENTRYPOINT ["/opt/spark/bin/spark-submit"]

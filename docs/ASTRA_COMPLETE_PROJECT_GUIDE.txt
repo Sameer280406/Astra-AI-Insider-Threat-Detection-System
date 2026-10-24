@@ -1,0 +1,1346 @@
+ASTRA — COMPLETE PROJECT GUIDE AND JURY Q&A
+============================================================
+
+Project name: Astra
+Document purpose: Beginner-to-technical explanation and presentation preparation
+Prepared from the repository contents inspected on 2026-10-22
+Suggested audience: Project owner, student presenter, product reviewer, technical jury
+
+IMPORTANT HONESTY RULE
+---------------------
+This guide describes what the code and project documents show. It distinguishes
+implemented behavior from optional infrastructure, simulated behavior, and
+future production work. Do not present a documented target as a live capability
+unless it has been independently demonstrated in the exact deployment being
+presented. No guide can predict every possible question, but the Q&A at the end
+prepares for the most likely product, architecture, security, ML, operations,
+and business questions.
+
+
+CONTENTS
+--------
+ 1. Astra in one minute
+ 2. The problem and the proposed solution
+ 3. Explain it with a simple analogy
+ 4. Product users and key concepts
+ 5. Architecture: what talks to what
+ 6. The event-to-investigation journey
+ 7. Data and feature engineering
+ 8. Machine learning and explainability
+ 9. Alerts, rules, cases, and containment
+10. Forensic evidence and auditability
+11. Tenancy, identity, and permissions
+12. User interface and product surfaces
+13. Repository map
+14. API and integration overview
+15. Running and demonstrating Astra
+16. Evaluation: what the recorded evidence says
+17. Limitations and production-readiness checklist
+18. Suggested presentation and deal conversation
+19. Jury-style questions and answers
+20. Glossary
+
+
+1. ASTRA IN ONE MINUTE
+----------------------
+Astra is a multi-tenant insider-risk detection and investigation workspace.
+It receives employee and endpoint activity events, derives behavioral signals,
+scores the activity using configurable model adapters, and presents risk,
+alerts, investigations, and response workflows to authorized analysts.
+
+Its notable product idea is to bring four steps into one workflow:
+
+    Observe activity -> assess risk -> investigate -> preserve evidence/respond
+
+The repository includes:
+  - A React/Next-style web interface.
+  - A Python FastAPI backend.
+  - SQLAlchemy persistence with SQLite for local use and PostgreSQL for the
+    container deployment.
+  - Tenant-scoped users, roles, API routes, audit records, and event records.
+  - A CERT r4.2 reference-data replay tool and pipeline-status UI.
+  - Mock, remote-service, and saved-artifact model adapter modes.
+  - Alerting, numeric rules, case workflows, feedback, and reports.
+  - Containment policy decisions and evidence capsules.
+  - Mock endpoint and identity adapters; no actual endpoint isolation or
+    credential/session modification is performed by the included adapters.
+
+Short elevator pitch:
+“Astra turns scattered insider-risk telemetry into an explainable, reviewable
+incident workflow, while keeping analysts in control and preserving a
+time-bounded evidence record.”
+
+
+2. THE PROBLEM AND THE PROPOSED SOLUTION
+----------------------------------------
+
+The problem:
+Organizations create large volumes of identity, endpoint, file, USB, and
+network activity. Security teams need to notice suspicious combinations early,
+understand why they are suspicious, investigate them in context, and document
+what they did. Simple threshold alerts can be noisy; disconnected tools make
+investigation and evidence review slow.
+
+The Astra approach:
+  1. Accept structured telemetry through an authenticated API or replay flow.
+  2. Build a compact feature description of the activity and its context.
+  3. Ask one or more model adapters for a risk prediction.
+  4. Combine model output with numeric rules and risk-change signals.
+  5. Give analysts a prioritized alert and investigation workspace.
+  6. Apply a response policy, which can recommend, require approval, or
+     simulate an automatic response.
+  7. Preserve selected, relevant event snapshots and hash them for later
+     integrity checks.
+
+The product is aimed at security operations, insider-risk, compliance, and
+forensics teams. It is not a replacement for an endpoint detection agent,
+identity provider, SIEM, legal process, or human investigation.
+
+The key design trade-off is deliberate: high-impact response actions should be
+separate from model inference. A model can recommend or provide evidence; an
+authorized policy and human workflow governs response. This reduces the chance
+that a single opaque prediction directly makes a destructive operational
+change.
+
+
+3. EXPLAIN IT WITH A SIMPLE ANALOGY
+-----------------------------------
+Think of an airport:
+
+  - Sensors and logs are the cameras, badge readers, and cargo scanners.
+  - An event is one observation, such as a person entering a restricted area.
+  - Features are the context: time of day, usual behavior, amount moved,
+    device identity, and peer comparison.
+  - Models are several screening officers looking for different patterns.
+  - The ensemble is a coordinator combining their assessments.
+  - An alert is a case for a human analyst, not a guilty verdict.
+  - A case is the analyst's investigation notebook.
+  - Containment is a response decision, not a model prediction.
+  - An evidence capsule is a sealed folder containing a defined subset of
+    relevant observations and the policy/model context.
+
+This analogy has a crucial limit: Astra's current response adapters simulate
+endpoint and identity actions. They do not actually isolate a computer, revoke
+credentials, or terminate sessions.
+
+
+4. PRODUCT USERS AND KEY CONCEPTS
+---------------------------------
+
+Actors:
+  - Viewer: reads permitted organization data.
+  - Auditor: reads, exports reports, and accesses audit information.
+  - SOC analyst: reviews alerts, triages cases, adds feedback and evidence
+    bookmarks.
+  - SOC manager: performs analyst work and can manage containment policy and
+    response actions.
+  - Organization administrator: manages organization users, ingestion, and
+    policy/response capabilities.
+  - Platform administrator: application-defined elevated role; should be
+    tightly controlled in a real deployment.
+
+Core records:
+  - Organization/tenant: the customer boundary.
+  - User/session: authenticated identity and current login state.
+  - Entity: the person or account whose behavior is being assessed.
+  - Event: one activity record.
+  - Feature record: model-ready numerical representation of an event.
+  - Prediction: one model's output.
+  - Alert: an analyst-facing signal.
+  - Rule: a numeric threshold rule over a supported feature or risk value.
+  - Case: analyst-owned investigation record with status, notes, and bookmarks.
+  - Incident: higher-severity response workflow, typically P1.
+  - Evidence capsule: manifest and selected snapshots associated with an
+    incident.
+  - Audit record: append-only, hash-linked record of sensitive actions.
+
+“Risk score” is a prioritization signal, not proof of malicious intent.
+“Anomaly” means deviation from a model or rule's expected pattern, not
+necessarily policy violation or malicious behavior. Business context and analyst
+review remain necessary.
+
+
+5. ARCHITECTURE: WHAT TALKS TO WHAT
+-----------------------------------
+
+Logical view:
+
+  Browser UI
+      |
+      | HTTP JSON API / Server-Sent Events
+      v
+  FastAPI backend
+      |-- authentication, authorization, validation, rate limits
+      |-- event feature construction and model gateway
+      |-- alert/case/containment/forensics services
+      |-- SQLAlchemy database access
+      |
+      +--> saved trained-artifact adapters, remote model HTTP services,
+      |    or explicitly synthetic mock model adapters
+      |
+      +--> SQLite local database or PostgreSQL deployment database
+      |
+      +--> mock endpoint/identity response adapters
+
+Separate CERT replay / pipeline path:
+
+  CERT reference CSVs
+      -> replay engine
+      -> Astra's in-process causal feature aggregator
+      -> local scoring by default
+      -> configured model adapter, policy rules/XAI, and database
+
+Optional distributed replay path:
+  CERT replay
+      -> Python feature aggregation -> Kafka cert-events
+      -> Spark Structured Streaming validation/forwarding
+      -> Kafka cert-features -> scoring worker
+      -> private API scoring route -> model, policy rules/XAI, database
+
+Important implementation distinction:
+  - The general authenticated POST /api/v1/events path uses the backend's
+    FeaturePipeline and model registry in-process.
+  - Local replay remains the default. KAFKA_SCORING_ENABLED=true selects the
+    asynchronous Kafka -> Spark -> scoring-worker path; queued events are not
+    counted as completed predictions until the worker persists them.
+  - Feature engineering remains in the Python AstraSparkAggregator. Spark
+    validates and forwards the supplied feature envelope; it does not calculate
+    a second, divergent feature vector.
+  - The general authenticated POST /api/v1/events path remains direct API
+    ingestion; it is not automatically routed through Kafka.
+  - Pipeline health reports broker topics, Spark master/processor application,
+    and scorer group
+    state. A configured topology alone is not proof of production availability.
+
+Frontend details:
+  - The UI is built with React and a Next.js/Vinext-oriented setup.
+  - app/page.tsx and the catch-all route render the main Astra workspace.
+  - components/astra.tsx manages workspace state and screen behavior.
+  - components/containment.tsx contains containment and evidence UI.
+  - lib/client.ts handles API calls, demo behavior, GET deduplication/cache,
+    and Server-Sent Events subscription behavior.
+
+Backend details:
+  - backend/app/main.py creates the FastAPI application and middleware.
+  - backend/app/api contains route and input-schema definitions.
+  - backend/app/core contains settings, database, and security helpers.
+  - backend/app/domain contains database entities, repositories, and forensics
+    models.
+  - backend/app/models contains model contracts, registry, and adapters.
+  - backend/app/services contains event processing, audit, replay, feature,
+    streaming, containment, and explanation logic.
+
+Storage details:
+  - Most business documents are represented as typed rows in a generic
+    tenant-owned records table with JSON data.
+  - Organizations, users, sessions, audit logs, evidence capsules, evidence
+    snapshots, and seals have dedicated database models.
+  - PostgreSQL is the intended container deployment database; SQLite is
+    convenient for local development/tests.
+
+
+6. THE EVENT-TO-INVESTIGATION JOURNEY
+-------------------------------------
+
+Step 1 — Authentication and tenant context
+  The user signs in to an organization. The backend validates credentials,
+  creates a server-side session row, and issues a signed JWT session token.
+  Requests resolve the user and tenant from that session. A caller should not
+  be able to choose another tenant by sending a tenant ID in a request.
+
+Step 2 — Event intake
+  EventInput has a strict schema. Important fields include eventId, entityId,
+  timestamp, action, resource, device, egressMb, sensitiveFiles, newDevice,
+  category, and bounded details. Unknown top-level fields are rejected.
+  Timestamps require a timezone and cannot be more than five minutes in the
+  future. Duplicate event IDs are checked within a tenant.
+
+Step 3 — Feature construction
+  The standard API scoring path uses recent entity history and peer activity
+  to compute the feature vector. The separate replay path uses
+  AstraSparkAggregator's running state. They share feature names but are not
+  identical implementations; see Section 7.
+
+Step 4 — Model inference
+  The registry selects the configured mode:
+    mock    = deterministic synthetic development behavior
+    trained = load saved local model artifacts
+    remote  = call configured remote inference endpoints over HTTP
+  The four base detector names are IsolationForest, Autoencoder, LSTM, and GNN.
+  Their predictions are passed to the Ensemble meta-model. Model output
+  conforms to a Prediction contract including score, confidence,
+  classification, threat type, explanation fields, and metadata.
+
+Step 5 — Persistence and risk update
+  Event, feature, and prediction records are saved. The entity's current risk,
+  velocity, last-seen time, classification, and explanation are updated unless
+  the event is identified as stale relative to the entity's last-seen time.
+
+Step 6 — Alert decision
+  An alert can be created when risk reaches the configured threshold, when the
+  risk change reaches the configured escalation velocity, or when an enabled
+  numeric rule matches. An alert contains severity/status, model consensus,
+  matched rules, a short explanation, and synthetic/provenance information
+  where available.
+
+Step 7 — Containment evaluation
+  Critical response policy evaluates its own gates (threshold, confidence,
+  detector consensus, and optional independent rule corroboration). Depending
+  on policy mode, Astra records an advisory, waits for approval, or invokes
+  the included simulated adapter when all automatic gates pass.
+
+Step 8 — Case work and evidence
+  Analysts can create a case from an alert, assign it, add notes, bookmark
+  events, change case status through allowed transitions, and record feedback.
+  Critical incidents can have a time-bounded evidence capsule whose manifest
+  records the trigger and policy/model context.
+
+Step 9 — Live update
+  The backend exposes an authenticated SSE route. In the code, the stream
+  polls tenant-scoped audit rows and emits updates; it is not a direct Kafka
+  event stream. The UI refreshes its data in response.
+
+
+7. DATA AND FEATURE ENGINEERING
+-------------------------------
+
+CERT source data:
+  The dataset resolver prefers data/r4.2, data/cert_reference/r4.2, and
+  data/cert, then falls back to data/cert_reference. The downloaded full
+  release is under data/cert_reference/r4.2 in this workspace. The reader
+  merges logon, device, HTTP, file, and optional email streams with bounded
+  memory; it does not preload the multi-gigabyte source. A source file must be
+  chronologically ordered; violations are reported as errors. Ground-truth
+  labels are resolved separately and filtered to dataset 4.2.
+
+  Do not quote the old 17,332 total for the full release. A streaming replay
+  does not know the total row count until the source iterator reaches EOF.
+  Keep the source local; its license restricts redistribution. The release is
+  described by its README as a dense-needle benchmark, not representative
+  real-world incident prevalence.
+
+  Missing byte measurements are not fabricated. Email size is used when
+  present, and HTTP bytes only when an explicit bytes= value is present.
+  Device/file/logon rows with no measured transfer amount use zero for the
+  numeric model input and increment events_without_measured_bytes. Egress
+  scores for those records are not actual transfer measurements.
+
+The eight named features in the replay Python aggregator:
+  1. egress_mb
+     Event bytes / 1,048,576; unavailable values are imputed as zero and counted.
+  2. sensitive_files
+     Binary filename-extension match.
+  3. off_hours
+     1 before 08:00, at/after 18:00, or on weekends.
+  4. new_device
+     1 when the user has already been seen on another device.
+  5. peer_deviation
+     Current egress divided by the bounded prior department mean.
+  6. baseline_egress
+     Mean of up to 200 prior event egress values for the user.
+  7. behavior_drift
+     Positive current-event egress minus user baseline.
+  8. session_count
+     Per-user event count for the current calendar date.
+
+In local mode, Kafka publishing is best-effort and Python performs scoring.
+With KAFKA_SCORING_ENABLED=true, feature-bearing replay events pass through
+Kafka, a Spark Structured Streaming validation/forwarding query, and a Kafka
+scoring worker into the shared API model/rule/XAI/database path. The worker
+commits offsets only after successful scoring or confirmed DLQ routing; delivery
+is at-least-once and API event persistence is idempotent. Naive CERT source
+timestamps are explicitly normalized to UTC at the Kafka serialization
+boundary before the strict downstream API timestamp validation.
+
+The Compose services are a single-broker plaintext reference stack with
+replication factor 1. They are not a secure, highly available production
+deployment. Production still requires TLS/authentication, broker ACLs,
+multi-broker replication, managed secrets, monitoring, checkpoint backup and
+restore, and load/failover testing. This stack was not launched or validated
+against a live broker/Spark cluster in this session.
+
+Training:
+  ml_training/experiments.py streams the source, samples a bounded uniform
+  reservoir (default 500,000 feature rows), and splits retained records
+  chronologically. Synthetic augmentation is applied only to the training
+  split; augmentation ratios and alert thresholds are selected on validation,
+  while the untouched test split is used for final metrics. The separate
+  train_models.py script trains on synthetic vectors and writes only to
+  ml_training/artifacts/synthetic_bootstrap. Do not call those artifacts
+  CERT-trained models. export_and_integrate.py explicitly runs and exports
+  the real-data experiment.
+
+Critical nuance: same labels do not guarantee identical calculations.
+  - backend/app/services/features.py is the normal API path. It computes an
+    entity history average, peer mean/standard deviation, an off-hours flag,
+    and related values from persisted events.
+  - backend/app/services/spark_service.py is an in-process stateful aggregator
+    used by CERT replay. It maintains known devices and rolling histories. Its
+    comments call it Spark parity; it is not itself a Spark Structured
+    Streaming job.
+  - CERT records without an explicit measured transfer size remain marked as
+    unknown. Numeric model input uses zero with a corresponding data-quality
+    counter; fixed transfer sizes are not fabricated.
+  - Feature documentation describes zero-lookahead causal intent. That is an
+    important property to test with ordered, late, and duplicated events; it
+    should not be asserted solely because documentation says so.
+
+When presenting a model result, say which feature path produced it and which
+data provenance it used. Do not casually equate the reference replay features
+with all possible customer telemetry. Real connectors must normalize their
+source logs into the validated Astra event contract.
+
+
+8. MACHINE LEARNING AND EXPLAINABILITY
+--------------------------------------
+
+Model roles (as represented by the adapter contract):
+  - Isolation Forest: unsupervised anomaly scoring through tree isolation.
+  - Autoencoder: anomaly scoring from reconstruction difference.
+  - LSTM: sequence-oriented scoring.
+  - GNN: graph/relationship-oriented scoring.
+  - Ensemble: combines base detector scores/confidences into a final score.
+
+Saved artifacts present in the inspected repository include:
+  scaler.joblib, isolation_forest.joblib, autoencoder.joblib, lstm.joblib,
+  gnn.joblib, ensemble.joblib, thresholds.json, explainer.joblib, and feature
+  statistics. Artifact presence is not by itself independent validation of
+  training data, calibration, robustness, or generalization.
+
+The adapter returns:
+  - anomalyScore from 0 to 1
+  - riskScore from 0 to 100
+  - confidence from 0 to 1
+  - classification (normal, suspicious, high_risk)
+  - threatType
+  - featureContributions and evidence
+  - metadata including mode/provenance information
+
+Model modes:
+  1. Mock mode is deterministic synthetic behavior. It is useful for UI/demo
+     work, not evidence of detection performance.
+  2. Trained mode loads local serialized artifacts and runs inference. Missing
+     required artifacts should result in a model-unavailable error, not a
+     successful-looking score.
+  3. Remote mode calls configured HTTP inference services with a timeout,
+     bearer token, tenant context, and idempotency key. The response is schema
+     validated. Remote errors are not meant to silently become mock scores.
+
+Explainability:
+  Astra constructs human-readable explanations and feature attributions from
+  feature values and saved feature statistics. Treat these as explanatory
+  signals, not automatically as causal explanations or formal SHAP values.
+  Model integration documentation explicitly warns that normalized
+  contributions are not necessarily SHAP values or causal attributions.
+  Explainability should help an analyst ask better questions; it cannot prove
+  intent.
+
+Rule evidence in explanations:
+  When an enabled detection rule matches an event, the event, ensemble
+  prediction, and alert carry the enriched XAI report. Its rule_matches data
+  identifies each matching rule, feature, >= comparison, configured threshold,
+  observed value, and configured severity. The rule_summary and narrative
+  explain the deterministic match, while explicitly distinguishing it from
+  model feature attribution. A rule can independently cause alerting, but it
+  does not change the model risk score or its feature attributions. An
+  explanation for an event with no rule matches retains the model/baseline XAI
+  content without a rule-match section.
+
+Training vs serving:
+  The repository includes ml_training scripts, experiment/evaluation files,
+  schema checks, and model artifacts. The serving gateway consumes model
+  artifacts; it is not an online learning system. Do not claim that model
+  weights update automatically from analyst feedback. Feedback is persisted
+  for future analysis/retraining, but a production retraining, approval,
+  registry, rollback, and drift-governance lifecycle needs separate validation.
+
+Implementation detail to be ready to discuss:
+  The inspected trained LSTM adapter creates a repeated fixed-length sequence
+  from the current feature vector in its inference branch. That is not the same
+  as supplying a real historical sequence of ten distinct time steps. The
+  request contract has a sequence field, but the inspected adapter branch
+  should be verified before claiming genuine temporal sequence inference.
+  Similarly, the inspected GNN call invokes infer with the current features
+  and an empty graph argument; a production graph detector would require
+  validated graph context. These are important validation questions for the
+  model owner.
+
+
+9. ALERTS, RULES, CASES, AND CONTAINMENT
+----------------------------------------
+
+Alerts:
+  Alerts are triage objects, not final judgments. They can arise from absolute
+  risk, risk velocity, or a configured numeric rule. The current backend
+  supports simple numeric greater-than-or-equal rules on a limited set of
+  feature/risk fields, not arbitrary executable policies.
+
+  A matched rule is recorded on the alert as structured ruleMatches evidence;
+  matchedRules remains a list of names for compatibility. The alert explanation
+  and XAI narrative identify the configured threshold and observed value. Alert
+  severity is the higher of the severity derived from the model score and the
+  severity of any matched rule. This rule severity affects alert prioritization,
+  not the model score or detector consensus. Rule updates affect future event
+  evaluations; previously stored events, alerts, and explanations are not
+  recalculated.
+
+Cases:
+  Cases attach to alerts and contain a title, status, assignee, notes, and
+  event bookmarks. The backend enforces a defined status transition graph and
+  validates that an assignee belongs to the same tenant and has an eligible
+  analyst/admin role. Similar-case matching is based on same-entity or title
+  token overlap; it is not semantic search or an ML similarity engine.
+
+Containment policy modes:
+  - advisory: create a high-priority incident and evidence; do not isolate.
+  - analyst_approval: require a permitted human approver.
+  - automatic_critical: only proceed when the policy gates pass.
+
+Key automatic gates:
+  - fused risk score meets the critical threshold;
+  - confidence meets the minimum;
+  - enough base detectors meet the critical threshold;
+  - optional rule corroboration is satisfied by an independent raw-feature
+    rule (riskScore/riskVelocity do not count as independent corroboration).
+  A matching rule may therefore be useful corroborating evidence, but a rule
+  match alone does not bypass the other critical-response gates or guarantee
+  containment.
+
+Approval and authorization:
+  Response controls require the relevant containment permission and a reason.
+  The policy snapshot and action result are recorded. These controls help
+  separate detection from action, but the included provider adapters are mocks.
+
+What the action does today:
+  MockEndpointAdapter returns a simulated success message and changes no
+  endpoint. MockIdentityAdapter changes no credential or session. UI and
+  persisted result data label actions as simulated. Release currently concerns
+  simulated network isolation; identity/session recovery is separate.
+
+
+10. FORENSIC EVIDENCE AND AUDITABILITY
+--------------------------------------
+
+Evidence capsule:
+  - Created for a critical incident.
+  - Stores a manifest with trigger reference, event-time windows, selected
+    categories, policy snapshot, and prediction context.
+  - Copies selected related events into evidence rows as snapshots, so a
+    later edit to the source event does not change the copied snapshot.
+  - Selects by relevant entity or endpoint/device, configured time range, and
+    selected category; it is not a whole-machine log scrape.
+  - Adds relevant post-trigger telemetry while collection remains open.
+  - A forensics worker seals capsules whose intake window has expired.
+
+Integrity mechanism:
+  The code computes SHA-256 digests over canonical JSON representations of the
+  manifest and snapshots. A seal records ordered evidence IDs and hashes plus
+  the manifest hash. Capsule retrieval recomputes hashes and returns an
+  integrityVerified result. Database triggers/constraints are intended to
+  prevent ordinary evidence updates/deletes and post-seal additions.
+
+What “immutable” means here:
+  It means application/database-level protections against normal mutations and
+  a tamper-evident hash structure. It does NOT mean protection from a
+  privileged database owner or a compromised host. For stronger evidentiary
+  assurance, export seals to independently controlled WORM/object-lock storage,
+  use trusted timestamps/signatures, and maintain legal chain-of-custody and
+  access controls.
+
+Audit log:
+  Sensitive actions are hash-linked per tenant using the previous record's
+  hash plus a canonicalized action payload. This is useful for integrity
+  checking, but it is not a digitally signed, externally anchored ledger.
+  A privileged database operator could alter the chain unless independent
+  copies/anchors exist.
+
+
+11. TENANCY, IDENTITY, AND PERMISSIONS
+--------------------------------------
+
+Tenant separation:
+  Each authenticated request resolves a tenant from the validated user
+  session. TenantRepository filters business records by tenant. Dedicated user
+  and session queries also include tenant boundaries. PostgreSQL setup includes
+  tenant-aware database controls in the migration/deployment design.
+
+Authentication:
+  - Password hashes are created/verified with Argon2.
+  - JWT contains subject, tenant ID, session ID, expiry, audience, and issuer.
+  - The server checks that the user and session still exist and that the
+    session has not expired.
+  - Logout removes the backing session, allowing revocation.
+  - The UI uses an HttpOnly cookie; the API also accepts bearer authorization.
+
+Request protections:
+  - Mutations require X-Astra-Request: 1.
+  - A supplied Origin must match allowed origins.
+  - Input schemas are strict and bounded.
+  - Request bodies over the configured content-length limit are rejected.
+  - Rate limits are grouped by request category.
+  - Production settings require secure cookies, Redis, and PostgreSQL.
+
+Rate limiting:
+  Configured categories include authentication, streaming, simulation, writes,
+  reads, and exempt system routes. Redis is used if configured; without Redis,
+  rate buckets are process-local. Process-local limits do not coordinate
+  multiple server workers and are not production-equivalent.
+
+Known production considerations:
+  - The project development guide notes public organization onboarding does
+    not currently require email verification; gate or replace before public
+    production launch.
+  - SSO/OIDC is not implemented, despite an auth providers route.
+  - MFA, password reset, invitations, service accounts, and real billing are
+    not implemented.
+  - Perform an independent threat model, security review, penetration test,
+    privacy review, and deployment configuration review before handling
+    customer telemetry.
+
+
+12. USER INTERFACE AND PRODUCT SURFACES
+---------------------------------------
+
+Workspace sections defined in navigation include:
+  - Overview
+  - Live events
+  - Risk leaderboard/entities
+  - Alert center
+  - Investigations/cases
+  - Containment and forensics
+  - Behavior analytics
+  - Threat timeline
+  - Relationship graph
+  - Model intelligence
+  - Organization/departments analytics
+  - Rules and policies
+  - Integrations
+  - Reports
+  - Audit logs
+  - Users and access
+  - Settings and billing
+  - System health
+  - Notifications
+
+The UI offers theme selection, navigation, search/filtering, event/alert/entity
+details, analyst actions, report export, and replay/health visibility. Exact
+feature availability depends on the selected role, backend mode, and seeded
+data.
+
+There are two front-end modes:
+  - Browser demo mode: uses a synthetic seed/store, browser storage, and mock
+    data behavior. It is appropriate for an offline UI demonstration only.
+  - Connected mode: calls the FastAPI API and uses its authenticated tenant
+    records. Backend failures should be treated as failures; do not describe
+    browser demo data as organization telemetry.
+
+The real API client has in-flight GET deduplication and a short read cache.
+These reduce duplicate dashboard reads, but they are not substitutes for
+backend capacity planning.
+
+
+13. REPOSITORY MAP
+------------------
+
+Paths below are relative to the Astra project directory.
+
+  app/
+    Next-style application shell, root page, catch-all page, styles, metadata.
+  backend/app/main.py
+    FastAPI construction, middleware, health route, router registration.
+  backend/app/api/
+    API endpoints and Pydantic request/policy schemas.
+  backend/app/core/
+    Settings, SQLAlchemy session/engine, tenant context, security helpers.
+  backend/app/domain/
+    ORM entities, record repository, and capsule/seal database models.
+  backend/app/models/
+    Model request/response contracts, registry, mock/remote/trained adapters,
+    and serialized trained model artifacts.
+  backend/app/services/
+    Event scoring pipeline, feature generation, CERT replay, Kafka interface,
+    in-process streaming aggregation, explanations, audit, containment, and
+    response adapters.
+  components/
+    Main Astra UI, containment UI, reusable workspace and intelligence views.
+  lib/
+    Frontend API client, contracts, navigation, and demo seed/store.
+  data/cert_reference/
+    CERT reference CSVs, including the insider ground-truth file.
+  ml_training/
+    Offline feature/model/evaluation/experiment scripts and generated reports.
+  backend/tests/
+    Backend tests for system, ML, replay, migrations, and rate limiting.
+  docs/
+    API/openapi, validation, capability, schema, and project documentation.
+  docker-compose.yml
+    PostgreSQL, Redis, migration job, backend, forensics worker, frontend,
+    and web proxy topology.
+  docker-compose.streaming.yml
+    Optional Zookeeper/Kafka/Spark/replay-worker topology.
+
+Package scripts:
+  pnpm dev      development command through scripts/run-framework.mjs
+  pnpm build    Vinext/Site build according to the repository documentation
+  pnpm start    local Wrangler preview of the built site
+  pnpm lint     ESLint
+
+The package manifest requires Node >=22.13.0 and pnpm 11. The README and
+development guide differ on Python version wording; use the repository's
+current backend environment and lock files and verify the chosen interpreter.
+The development guide distinguishes the standard Next connected build from
+the Vinext synthetic-site build.
+
+
+14. API AND INTEGRATION OVERVIEW
+-------------------------------
+
+The API base is /api/v1; the OpenAPI document and FastAPI docs are available
+from the backend when it is running.
+
+Representative routes:
+  Authentication: POST /auth/login, POST /auth/onboard, GET /auth/me,
+                  POST /auth/logout, GET /auth/providers
+  Intelligence:   POST /events, GET /events, GET /entities, GET /alerts,
+                  GET /overview, GET /models, GET /stream
+  Analysis:       POST /explain, GET /explain/event/{event_id}
+  Cases:          POST /cases, PATCH /cases/{id},
+                  POST /cases/{id}/notes, POST /cases/{id}/bookmarks
+  Administration: GET/POST /rules, GET/POST /users,
+                  GET/POST /integrations, GET /subscription
+  Audit/report:   GET /audit, GET /reports/export
+  Response:       GET/PUT /response/policy,
+                  GET /response/incidents,
+                  POST /response/incidents/{id}/{approve|release|escalate},
+                  GET /response/capsules/{id}
+  Replay:         GET /pipeline/status, GET /replay/status,
+                  POST /replay/batch, /replay/start, /replay/pause,
+                  /replay/resume, /replay/stop
+
+External model integration:
+  Remote model endpoints receive a strict FeatureRequest and return a strict
+  Prediction. The backend applies timeouts, validates identity/model/timestamp,
+  and requires HTTPS endpoints in production. The browser must never contain
+  model credentials.
+
+Integrations:
+  Creating an integration record does not activate a live SIEM, webhook,
+  Kafka, or SOAR connector. The development guide calls these configuration
+  records/extension boundaries until real adapters are implemented and
+  validated.
+
+
+15. RUNNING AND DEMONSTRATING ASTRA
+-----------------------------------
+
+Development setup outline:
+  1. Install a compatible Python environment, Node >=22.13, and pnpm 11.
+  2. Copy .env.example to .env and create strong local secrets. Do not commit
+     .env or share it.
+  3. Install backend requirements from backend/requirements.txt.
+  4. Apply Alembic migrations and seed development/demo data.
+  5. Start the FastAPI backend.
+  6. Install frontend dependencies with the lock file and start pnpm dev.
+  7. Sign in using the development seed account configured by the project.
+
+Container outline:
+  docker compose up --build -d
+  docker compose exec backend python -m app.seed
+
+Optional streaming infrastructure:
+  docker compose -f docker-compose.streaming.yml up -d
+
+Follow the current README and DEVELOPMENT.md for the exact platform-specific
+commands and environment variables. A configured container is not proof of a
+healthy service: check health routes, container status, logs, database
+migrations, and replay status.
+
+Suggested honest demo:
+  1. Show the Overview and explain it reflects the selected demo/tenant data.
+  2. Open Live events and show pipeline/replay health, including offline
+     indicators if Kafka/Spark are not running.
+  3. Replay a small batch and identify it explicitly as CERT reference replay.
+  4. Open a generated alert and explain its score, detector context, and
+     feature-based explanation.
+  5. Create/open an investigation, add a note, and bookmark relevant events.
+  6. Open a P1 incident and show policy gates and the evidence capsule.
+  7. Approve/release only in the simulation environment and call out that the
+     adapter says simulated and changed no real endpoint.
+  8. Show audit/evidence integrity state and explain its trust boundary.
+
+
+16. EVALUATION: WHAT THE RECORDED EVIDENCE SAYS
+-----------------------------------------------
+
+The repository includes an older ml_training/cert_pipeline_report.json dated
+2026-10-22. It predates the bounded reader and current evaluation implementation.
+It records:
+  - dataset source: cert_reference
+  - 17,332 events loaded
+  - 300 events evaluated in that run
+  - 20 users evaluated
+  - 3 insider ground-truth scenarios
+  - all 3 scenarios detected in that recorded run
+  - 1,195 predictions and 210 alerts recorded in the report
+  - report verdict: PASS
+  - reported performance: 86.81 events/second and 11.52 ms average latency
+  - Kafka reported offline and PySpark unavailable; the Python aggregator
+    fallback was reported instead of a live Kafka/Spark runtime
+
+Interpretation:
+  - Treat these figures as historical artifact contents, not current verified
+    performance. Do not use them as proof of the updated source/replay path.
+  - The old 17,332 count refers to a small reference fixture, not the downloaded
+    full r4.2 source. The new streaming reader does not pre-count rows.
+  - Evaluating 300 events is not a full-dataset evaluation.
+  - Three detected scenarios is a very small incident sample. “100% recall”
+    here means 3 of 3 listed scenarios in this run, not 100% detection of all
+    insider threats or all future organizations.
+  - A low false-alert rate needs its denominator, time window, labeling
+    process, and independent reproduction to be meaningful.
+  - The updated evaluator writes measured counters from its invocation and
+    supports bounded samples. Rerun it against the selected local source before
+    making any current performance or accuracy claim.
+  - The test count differs across project documents (README lists 30 passing
+    tests; docs/VALIDATION.md records 14 passed on its build date). Do not say
+    “all tests pass today” unless you run the current test suite and record the
+    actual output.
+
+Before a serious buyer relies on model performance, request:
+  - full benchmark command, commit/version, and environment;
+  - dataset license/provenance and exact train/validation/test split;
+  - user-, time-, and scenario-level leakage controls;
+  - precision, recall, PR-AUC, false positives per user-day, calibration,
+    confidence intervals, and subgroup performance;
+  - independent evaluation on a separate environment/customer-like dataset;
+  - analyst review of false positives and impact on employees;
+  - comparison to a simple baseline and existing tools;
+  - reproducibility artifacts and model/data versioning.
+
+
+17. LIMITATIONS AND PRODUCTION-READINESS CHECKLIST
+-------------------------------------------------
+
+Be candid about these boundaries:
+  1. Containment adapters simulate all effects. No EDR, firewall, identity,
+     or endpoint provider is changed by this repository.
+  2. The recorded CERT evaluator shows Kafka and Spark offline. The aggregator
+     fallback is local Python state; the replay's Kafka producer attempts
+     publish but the evaluator can proceed without a broker.
+  3. The normal EventInput API scoring route computes features in a separate
+     in-process FeaturePipeline; it is not wired as a Kafka consumer.
+  4. The exact feature semantics differ between API and replay feature paths.
+  5. Model artifacts exist, but their training provenance, calibration,
+     independent generalization, and runtime behavior require reproducible
+     validation. ML feedback does not automatically retrain a model.
+  6. The inspected trained LSTM and GNN inference branches warrant model-owner
+     validation before claiming true sequence/graph reasoning.
+  7. The evaluation sample covers only three labeled insider scenarios and
+     300 evaluated events in the saved report.
+  8. SSO, MFA, password reset, invitations, billing, and working external
+     integrations are not implemented.
+  9. Evidence hashes are tamper-evident within application/database controls,
+     but are not externally anchored, signed legal evidence.
+ 10. Process-local rate limits are not shared across multiple app workers
+     unless Redis is configured.
+ 11. No independent security penetration test, customer-scale load test,
+     browser acceptance test, or live-provider safety test is established by
+     the inspected validation record.
+
+Minimum before handling real customer telemetry:
+  - Independent security/threat-model review and penetration test.
+  - Privacy, labor, legal, and retention-policy review for employee monitoring.
+  - Production secrets management, TLS, secure cookies, Redis, PostgreSQL,
+    backups, restore drills, monitoring, and incident response.
+  - Tenant isolation tests against the exact production database and roles.
+  - Model validation, drift monitoring, calibration, fairness review, and
+    human appeal/escalation processes.
+  - Durable queue/outbox and provider-specific idempotency/reconciliation
+    before any real response actions.
+  - WORM/object-lock or equivalent independent evidence anchoring if required.
+  - Connector validation, provenance tracking, and data-quality monitoring.
+  - Defined SLOs, capacity tests, cost model, and on-call ownership.
+  - Customer contracts covering data processing, security, retention, and
+    response responsibility.
+
+
+18. SUGGESTED PRESENTATION AND DEAL CONVERSATION
+-----------------------------------------------
+
+Two-minute explanation:
+“Astra is a security operations workspace focused on insider-risk signals.
+It takes structured event telemetry, derives behavioral features, uses
+configurable model adapters to produce explainable risk signals, and routes
+those signals into alerts, investigations, and evidence workflows. The
+important separation is that a model score does not itself equal guilt or
+automatically trigger a real-world action. Response is governed by explicit
+policy and authorized roles. In this repository, endpoint and identity
+actions are simulated, which makes the workflow demonstrable without claiming
+live EDR control. The next enterprise step is to validate models on
+representative data, connect real telemetry and response providers, and
+complete independent security, privacy, and scale testing.”
+
+For a commercial/large-enterprise discussion, do not open with “we have
+perfect detection” or “this is production-ready.” Lead with:
+  - the workflow problem being addressed;
+  - the data and model evidence actually available;
+  - the human review and evidence chain;
+  - the simulated-vs-live integration boundary;
+  - the proof plan to close outstanding risks.
+
+Good questions to ask the buyer:
+  - Which identity, endpoint, file, network, and HR systems are authoritative?
+  - What is the expected event volume and retention period?
+  - Which groups can investigate, approve, or release containment?
+  - What constitutes an acceptable false-positive rate?
+  - What employee privacy, labor, legal-hold, and jurisdiction requirements
+    apply?
+  - Must data remain in a region or customer-controlled cloud?
+  - Which evidence format, signature, timestamp, and export controls are
+    required?
+  - Which provider APIs and recovery/rollback procedures are mandatory?
+  - What are the required availability, latency, and support objectives?
+
+
+19. JURY-STYLE QUESTIONS AND ANSWERS
+------------------------------------
+
+A. PRODUCT AND VALUE
+
+Q1. What is Astra?
+A. A multi-tenant insider-risk intelligence, investigation, and evidence
+   workflow. It accepts structured activity, scores risk, presents alerts,
+   and supports controlled investigation/response.
+
+Q2. What problem does it solve?
+A. It aims to connect telemetry, prioritization, analyst investigation, and
+   evidence capture in one workflow so a suspicious pattern is easier to
+   assess and document.
+
+Q3. Who is the user?
+A. SOC analysts and managers, organization administrators, auditors, and
+   read-only stakeholders. Permissions differ by role.
+
+Q4. Is Astra deciding whether an employee is guilty?
+A. No. It identifies activity that may warrant review. A score is not proof
+   of intent, policy violation, or misconduct. Human investigation and due
+   process are essential.
+
+Q5. Why focus on insider risk rather than generic malware detection?
+A. The product models employee/entity behavior, peer deviation, resource
+   access, and internal response workflows. It is not an endpoint malware
+   scanner or a replacement for EDR.
+
+Q6. What is the strongest differentiator?
+A. The integrated path from explainable risk signal to analyst workflow,
+   policy-gated response, and time-bounded evidence snapshots. The value must
+   be validated against a customer's existing tooling and outcomes.
+
+Q7. Is it a SIEM or SOAR?
+A. Not as currently implemented. It has API and integration extension points
+   and a response workflow, but the repository does not implement active
+   production SIEM ingestion or live SOAR provider control.
+
+B. ARCHITECTURE AND DATA FLOW
+
+Q8. Walk me through one event.
+A. The API authenticates the caller and determines the tenant, validates the
+   event schema, rejects duplicate event IDs, derives features, calls the
+   configured base detector adapters and ensemble, persists results, updates
+   the entity, creates alerts if rules/thresholds match, evaluates containment
+   policy, and appends audit/evidence information as applicable.
+
+Q9. Where does data live?
+A. SQLAlchemy persists it. Local development can use SQLite; the container
+   topology uses PostgreSQL and Redis. Most business records use a typed
+   generic records table with tenant ID and JSON payload; audit, session, and
+   evidence structures have dedicated tables.
+
+Q10. Does every event go through Kafka?
+A. No. The ordinary POST /events path processes in the backend. CERT replay
+   has a Kafka producer path, but it can report the broker as offline and
+   continue through its in-process processing path.
+
+Q11. Is Spark running in the evaluation?
+A. The saved evaluation report says PySpark was unavailable and records the
+   Astra Python streaming aggregator fallback. The Docker Compose file defines
+   Kafka/Spark services, but that is not proof they were running for the
+   report.
+
+Q12. Is the SSE route a real-time Kafka feed?
+A. No. The backend polls tenant-scoped audit records and emits SSE updates.
+   The interface refreshes based on those messages. It is near-real-time
+   application update behavior, not a Kafka consumer stream.
+
+Q13. How do you handle duplicates?
+A. Event IDs are unique per tenant in the event path; duplicate retries return
+   a duplicate result instead of scoring and persisting the same event again.
+   Replay also checks existing event identifiers before persistence.
+
+Q14. What happens if a model is down?
+A. In remote mode, invalid or unavailable model responses should fail scoring
+   with a model-unavailable response; it should not silently present a mock
+   score as real. The client must retry safely using the same source event ID.
+
+Q15. Can Astra process a customer's custom log format?
+A. It needs a connector/normalizer that maps source data into the strict
+   EventInput schema and preserves event identity, time zone, provenance, and
+   tenant. The repository provides a boundary, not a universal parser for all
+   vendor logs.
+
+C. MACHINE LEARNING AND EVALUATION
+
+Q16. Which models are included?
+A. Adapter interfaces and saved artifacts for Isolation Forest, Autoencoder,
+   LSTM, GNN, and an ensemble meta-classifier. The exact artifact provenance
+   and performance must be verified before deployment claims.
+
+Q17. Why use an ensemble?
+A. Different detectors can capture different patterns. The ensemble is
+   intended to combine their signals. It must still be benchmarked against
+   each individual model and simpler rules to show that the added complexity
+   improves outcomes.
+
+Q18. What does the score mean?
+A. A normalized risk score from 0 to 100 generated by the selected model
+   adapter. It is a prioritization output, not a calibrated probability of
+   malicious intent unless calibration evidence establishes that interpretation.
+
+Q19. What does confidence mean?
+A. A model-provided confidence field in the prediction contract. Its
+   calibration and statistical meaning need to be defined by the model owner;
+   do not call it a probability without supporting calibration tests.
+
+Q20. How do you prevent false positives?
+A. The product combines risk thresholds and rules, supports analyst review,
+   and stores feedback. That is not enough to claim false positives are solved.
+   Measure precision and false alerts per user-day on representative,
+   independently labeled data; tune thresholds with security and employee
+   impact in mind.
+
+Q21. How much ground truth is in the current evaluation?
+A. An older saved report names three scenarios and 300 evaluated events from a
+   17,332-row reference fixture. It predates the current reader/evaluator and
+   is not a current performance result. The evaluator must be rerun on the
+   downloaded r4.2 source before making a new claim.
+
+Q22. Why do published performance numbers conflict?
+A. The README/ML evaluation document and the current JSON report show different
+   throughput and latency values. Report the exact artifact, date, sample,
+   and environment. Re-run the evaluator with a fixed benchmark procedure
+   before quoting one current number.
+
+Q23. Is model training continuous?
+A. No online learning is demonstrated. Offline training/experiment scripts
+   and saved artifacts are present. Analyst feedback is persisted but does not
+   automatically retrain or deploy a new model.
+
+Q24. How does the model explain itself?
+A. Astra presents feature/context attributions and narrative explanations
+   built from the feature values and statistics. They are useful investigation
+   aids, but they are not automatically causal explanations or SHAP values.
+
+Q25. Does the LSTM analyze a true event sequence?
+A. The trained adapter's inspected branch constructs a repeated sequence from
+   the current vector. That warrants validation and should not be described as
+   genuine distinct historical sequence analysis without a corrected,
+   demonstrated input path.
+
+Q26. Does the GNN use the full company graph?
+A. The event request has graph fields, but the inspected trained adapter calls
+   its graph detector with current features and an empty graph argument. A
+   persistent enterprise graph is not established by that code path.
+
+Q27. How is data leakage prevented?
+A. The design intends causal, past-only feature calculation. The real proof
+   should be tests that enforce timestamp ordering, replay determinism,
+   duplicate/late-event handling, and train/test split by user/time. The
+   repository's documentation alone does not prove leakage-free performance.
+
+D. RESPONSE, EVIDENCE, AND TRUST
+
+Q28. Does automatic containment isolate an endpoint?
+A. No. Included endpoint and identity adapters are mocks. The UI/result may
+   say the simulated action succeeded, but no endpoint, account, or session
+   is actually changed.
+
+Q29. What is the automatic response safeguard?
+A. Policy mode plus gates for threshold, confidence, detector consensus, and
+   optional independent rule corroboration; response requires authorized
+   permissions and an audited reason. Real-provider safety still needs
+   testing and a durable outbox/reconciliation design.
+
+Q30. What does the evidence capsule contain?
+A. A manifest and selected related event snapshots within configured time
+   windows/categories, plus policy and prediction context. It is selective,
+   not a whole-machine forensic image.
+
+Q31. Is the capsule immutable?
+A. The app hashes manifest/snapshots and database protections block ordinary
+   modifications and post-seal additions. A database administrator or
+   compromised host could still alter data. Strong legal assurance needs
+   external anchoring/signatures and chain-of-custody procedures.
+
+Q32. Is the audit log blockchain?
+A. No. It is a tenant-scoped hash-linked audit record. It is tamper-evident
+   under ordinary application access but is neither a blockchain nor an
+   independently signed immutable ledger.
+
+Q33. How does a customer prove who approved an action?
+A. The action record captures actor/reason/result and an audit entry; the
+   session and role identify the user. Production assurance should add robust
+   identity assurance (e.g., SSO/MFA), secure clocking, retention, and
+   independent evidence preservation.
+
+E. SECURITY, TENANCY, AND PRIVACY
+
+Q34. How do you isolate customers?
+A. Tenant identity is derived from the authenticated session; repository and
+   user/session queries scope by tenant. PostgreSQL deployment controls also
+   aim to enforce tenant boundaries. Validate with cross-tenant tests on the
+   actual production database and every route.
+
+Q35. Which roles can approve containment?
+A. The permission map reserves containment for SOC manager and organization/
+   platform administrators. Viewers and SOC analysts cannot approve/release
+   through those endpoints.
+
+Q36. How are passwords stored?
+A. Argon2 password hashes are used. The application issues signed JWT session
+   tokens and also tracks server-side sessions, so a revoked session can no
+   longer authenticate.
+
+Q37. How is CSRF addressed?
+A. Mutation requests require a custom X-Astra-Request header and reject a
+   mismatched supplied Origin; the session cookie is configured HttpOnly and
+   SameSite. This must be reviewed in the exact deployed proxy/origin setup.
+
+Q38. Does it support SSO or MFA?
+A. The auth providers route currently says no OIDC provider is configured.
+   SSO/MFA are not implemented in the inspected application.
+
+Q39. How do you protect employee privacy?
+A. The design uses selected categories and time-bounded evidence instead of
+   whole-machine scraping. A customer deployment still needs data minimization,
+   notice/consent where required, retention schedules, purpose limitation,
+   access review, legal review, and employee appeal procedures.
+
+Q40. Can you use Astra to monitor employees without their knowledge?
+A. The appropriate deployment should follow applicable law, contracts, and
+   company policy. Monitoring scope, notice, access, retention, and decisions
+   should be governed by the customer and legal/privacy stakeholders.
+
+F. SCALE, RELIABILITY, AND BUSINESS
+
+Q41. What is the current throughput?
+A. The saved report says 86.81 events/second in one run, but other project
+   documents report different values. It was not a customer-scale load test.
+   The defensible answer is to rerun a reproducible workload and measure
+   p50/p95/p99 latency, throughput, queue lag, DB performance, and error rate.
+
+Q42. How does Astra scale?
+A. The architecture uses FastAPI, PostgreSQL, Redis rate limiting, and
+   optional streaming services. Horizontal scale requires shared rate-limit
+   state, connection/pool tuning, database indexing, durable queues, worker
+   coordination, and load testing; it is not established by the local report.
+
+Q43. What happens when the database is unavailable?
+A. The backend depends on database access for authentication and persistence.
+   It should fail requests explicitly. Production deployment must provide
+   monitoring, backups, recovery tests, and defined data-loss objectives.
+
+Q44. What are the business outcomes?
+A. The intended outcomes are faster triage, better context, consistent
+   evidence capture, and controlled response. No quantified customer ROI is
+   proven in the repository. Establish baseline investigation time, analyst
+   hours, false positives, incident losses, and adoption before calculating ROI.
+
+Q45. How would you price it?
+A. The code has Starter/Team/Enterprise entitlement limits for event volume,
+   user seats, graph, and integration flags, but no real payment processor.
+   Pricing should be validated with customer value, data volume, deployment,
+   support, and provider costs; the UI plan labels are not a billing system.
+
+Q46. What is needed for a production EDR integration?
+A. Provider-specific authentication, exact target identity resolution,
+   management-channel allowlist validation, safe quarantine/release semantics,
+   idempotency, durable outbox, retry/circuit breaker, state reconciliation,
+   rollback/recovery, audit, and a tested non-production provider environment.
+   A database transaction cannot roll back an external network action.
+
+Q47. What are the biggest risks before enterprise rollout?
+A. Model validity/generalization, feature path consistency, real connector
+   correctness, employee privacy/legal compliance, production isolation,
+   durable orchestration for external side effects, and independent security/
+   load testing.
+
+Q48. What would you build next?
+A. First verify and harden the current scoring/evaluation contracts; then
+   implement production-grade normalized connectors, model governance and
+   drift monitoring, SSO/MFA, durable queue/outbox processing, provider
+   adapters, independent evidence anchoring, and operational dashboards/SLOs.
+   Prioritize with customers rather than promising every feature at once.
+
+G. DIFFICULT FOLLOW-UP QUESTIONS
+
+Q49. Your project says “100% recall.” Why should I believe it?
+A. I would not present that historical number as current. It came from a
+   limited saved reference run. I would rerun the updated evaluation, show the
+   exact source, splits and conditions, then validate on independent
+   customer-like data with confidence intervals and false-positive analysis.
+
+Q50. Your deck says Kafka and Spark, but the report says offline. Which is true?
+A. The historical report was produced while Kafka and Spark were unavailable,
+   so that run used the Python path. The code now includes an optional
+   feature-bearing Kafka -> Spark validation/forwarding -> scoring-worker path.
+   It is opt-in and was not run against live infrastructure here. The supplied
+   Compose topology is a local single-broker plaintext reference, not a
+   production HA/security deployment. I would claim live processing only when
+   runtime readiness checks and consumer/query telemetry verify it.
+
+Q51. If all actions are simulated, what is actually useful today?
+A. The useful demonstrated scope is the event/intelligence workflow, role-
+   scoped investigation, policy evaluation, response orchestration interface,
+   and evidence data model. The simulated adapter is a safe integration seam;
+   it is not a live EDR product.
+
+Q52. How do you know a high risk score is not discriminatory?
+A. The repository does not establish that. A responsible launch needs subgroup
+   testing, feature review, explainability validation, human review, appeal,
+   use limitation, and governance for sensitive employment decisions.
+
+Q53. Can an analyst feedback label improve tomorrow's model?
+A. Not automatically. Feedback is stored. A separately governed offline
+   retraining and validation pipeline would need to use it.
+
+Q54. Is the evidence court-ready?
+A. Not on the basis of this code alone. It provides selective snapshots and
+   integrity hashes, but legal admissibility requires provider provenance,
+   trusted timestamps, independent storage, chain-of-custody controls,
+   jurisdictional review, and documented procedures.
+
+Q55. What do you mean by “real-time”?
+A. The app supports event scoring and an SSE audit-update route. Exact
+   end-to-end latency depends on deployment and the measurement path. The
+   saved benchmark is small and does not establish production SLOs.
+
+Q56. What is the most important thing you will not overclaim?
+A. I will not claim 100% general threat detection, live containment, a fully
+   running Kafka/Spark system based only on configuration, court-grade
+   immutability, or production readiness without independent evidence.
+
+
+20. GLOSSARY
+------------
+
+Anomaly:
+  Activity that differs from a model's learned/defined expectation.
+
+Audit chain:
+  Records where each hash depends on the prior record and current payload.
+
+Baseline:
+  A reference summary of an entity's or peer group's past behavior.
+
+CERT r4.2:
+  A Carnegie Mellon reference dataset version used here for replay/evaluation.
+
+Confidence:
+  A model output field. Its numerical calibration must be established by the
+  model owner; it is not automatically a probability.
+
+Containment:
+  A response intended to limit harm, such as endpoint isolation. In this
+  repository, endpoint/identity side effects are simulated.
+
+Event:
+  One normalized observation of activity.
+
+Feature:
+  A numeric value derived from an event and its past/context, supplied to a
+  model.
+
+False positive:
+  A benign event or behavior incorrectly raised as suspicious.
+
+Ground truth:
+  Labels used to evaluate which events/scenarios are known incidents.
+
+Idempotency:
+  Repeating the same request with the same identity should not create repeated
+  side effects or duplicate records.
+
+Insider risk:
+  Risk of harmful or policy-violating activity involving a trusted account or
+  person; a risk signal is not proof of intent.
+
+Isolation Forest:
+  An unsupervised method that identifies points easier to isolate in random
+  trees as potential anomalies.
+
+JWT:
+  Signed token format used to carry validated session claims between client
+  and server.
+
+Kafka:
+  Distributed event broker. The optional replay path publishes feature-bearing
+  events and a scoring worker consumes validated features; at-least-once
+  delivery and runtime readiness must be verified.
+
+LSTM:
+  Recurrent neural network architecture often used for sequences.
+
+Multi-tenancy:
+  Multiple organizations share an application while their data and permissions
+  are logically isolated.
+
+Precision:
+  Fraction of raised alerts that are true positives in a defined evaluation.
+
+Recall:
+  Fraction of known incidents detected in a defined evaluation.
+
+Risk score:
+  Prioritization number; not inherently a probability or determination of
+  misconduct.
+
+SSE:
+  Server-Sent Events; a server-to-browser stream over HTTP.
+
+Spark:
+  Distributed data-processing engine. The optional job validates/forwards
+  feature vectors between Kafka topics; model feature engineering remains in
+  the Python replay aggregator.
+
+Tenant:
+  An organization/customer isolation boundary.
+
+WORM:
+  Write Once, Read Many storage used to make retained data difficult to alter.
+
+XAI:
+  Explainable AI; context and feature attribution intended to help a human
+  understand model output. It does not automatically establish causality.
+
+
+FINAL PRESENTATION REMINDER
+---------------------------
+Confidence comes from precision, not exaggeration. Explain the working
+workflow, show the actual demo mode, state what is simulated, quote evaluation
+with sample size and conditions, describe the security/privacy controls, and
+name the evidence still needed before a production or high-value enterprise
+commitment.
+
+Repository references useful for continued study:
+  README.md
+  architecture.md
+  API_CONTRACT.md
+  DATA_PIPELINE.md
+  ML_TRAINING_EVALUATION.md
+  MODEL_INTEGRATION.md
+  CONTAINMENT_FORENSICS.md
+  DEVELOPMENT.md
+  docs/VALIDATION.md
+  docs/CAPABILITY_MATRIX.md
+
+END OF GUIDE

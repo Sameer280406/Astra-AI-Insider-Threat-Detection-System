@@ -1,0 +1,12 @@
+node_modules
+.next
+dist
+.git
+.sites-runtime
+.env
+backend/.venv
+backend/*.db
+backend/__pycache__
+**/__pycache__
+**/.pytest_cache
+outputs

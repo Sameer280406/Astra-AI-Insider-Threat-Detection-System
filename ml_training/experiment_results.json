@@ -1,0 +1,160 @@
+{
+  "metadata": {
+    "is_real_cert_logs": false,
+    "data_path": "C:\\Users\\jagta\\Downloads\\Astra_Fullstack\\Astra_Fullstack_Containment_Forensics\\Astra\\data\\cert_reference",
+    "train_size": 12132,
+    "val_size": 2600,
+    "test_size": 2600,
+    "train_pos": 221,
+    "test_pos": 267,
+    "seed": 42
+  },
+  "experiments": {
+    "Exp_A_Real_Only": {
+      "IsolationForest": {
+        "model": "IsolationForest_ExpA",
+        "threshold": 0.5,
+        "precision": 0.1027,
+        "recall": 1.0,
+        "f1": 0.1863,
+        "pr_auc": 0.7888,
+        "roc_auc": 0.983,
+        "tp": 267,
+        "fp": 2333,
+        "tn": 0,
+        "fn": 0,
+        "false_alerts_per_user_day": 22.4657,
+        "incident_recall": 1.0
+      },
+      "Autoencoder": {
+        "model": "Autoencoder_ExpA",
+        "threshold": 0.5,
+        "precision": 0.6667,
+        "recall": 0.9963,
+        "f1": 0.7988,
+        "pr_auc": 0.7998,
+        "roc_auc": 0.9854,
+        "tp": 266,
+        "fp": 133,
+        "tn": 2200,
+        "fn": 1,
+        "false_alerts_per_user_day": 1.2807,
+        "incident_recall": 1.0
+      },
+      "XGBoost_Unweighted": {
+        "model": "XGBoost_Unweighted_ExpA",
+        "threshold": 0.5,
+        "precision": 0.9015,
+        "recall": 0.9251,
+        "f1": 0.9131,
+        "pr_auc": 0.9513,
+        "roc_auc": 0.9922,
+        "tp": 247,
+        "fp": 27,
+        "tn": 2306,
+        "fn": 20,
+        "false_alerts_per_user_day": 0.26,
+        "incident_recall": 1.0
+      }
+    },
+    "Exp_B_Class_Weighted": {
+      "XGBoost_Weighted": {
+        "model": "XGBoost_Weighted_ExpB",
+        "threshold": 0.5,
+        "precision": 0.8333,
+        "recall": 0.9925,
+        "f1": 0.906,
+        "pr_auc": 0.9203,
+        "roc_auc": 0.9897,
+        "tp": 265,
+        "fp": 53,
+        "tn": 2280,
+        "fn": 2,
+        "false_alerts_per_user_day": 0.5104,
+        "incident_recall": 1.0
+      },
+      "LogisticRegression_Balanced": {
+        "model": "LogisticRegression_Balanced_ExpB",
+        "threshold": 0.5,
+        "precision": 0.8618,
+        "recall": 0.9813,
+        "f1": 0.9177,
+        "pr_auc": 0.9491,
+        "roc_auc": 0.9918,
+        "tp": 262,
+        "fp": 42,
+        "tn": 2291,
+        "fn": 5,
+        "false_alerts_per_user_day": 0.4044,
+        "incident_recall": 1.0
+      }
+    },
+    "Exp_C_Synthetic_Augmented": {
+      "ratio_1pct": {
+        "model": "XGBoost_Aug_1pct_ExpC",
+        "threshold": 0.5,
+        "precision": 0.8548,
+        "recall": 0.9925,
+        "f1": 0.9185,
+        "pr_auc": 0.9509,
+        "roc_auc": 0.9921,
+        "tp": 265,
+        "fp": 45,
+        "tn": 2288,
+        "fn": 2,
+        "false_alerts_per_user_day": 0.4333,
+        "incident_recall": 1.0
+      },
+      "ratio_5pct": {
+        "model": "XGBoost_Aug_5pct_ExpC",
+        "threshold": 0.5,
+        "precision": 0.8553,
+        "recall": 0.9963,
+        "f1": 0.9204,
+        "pr_auc": 0.9518,
+        "roc_auc": 0.993,
+        "tp": 266,
+        "fp": 45,
+        "tn": 2288,
+        "fn": 1,
+        "false_alerts_per_user_day": 0.4333,
+        "incident_recall": 1.0
+      },
+      "ratio_10pct": {
+        "model": "XGBoost_Aug_10pct_ExpC",
+        "threshold": 0.5,
+        "precision": 0.8553,
+        "recall": 0.9963,
+        "f1": 0.9204,
+        "pr_auc": 0.9543,
+        "roc_auc": 0.9929,
+        "tp": 266,
+        "fp": 45,
+        "tn": 2288,
+        "fn": 1,
+        "false_alerts_per_user_day": 0.4333,
+        "incident_recall": 1.0
+      }
+    },
+    "Exp_D_Calibrated_Fusion": {
+      "calibrated_threshold": 0.85,
+      "autoencoder_p95": 0.219835,
+      "best_augmentation_ratio": 0.05,
+      "Ensemble_Calibrated": {
+        "model": "Ensemble_Calibrated_ExpD",
+        "threshold": 0.85,
+        "precision": 0.8576,
+        "recall": 0.97,
+        "f1": 0.9104,
+        "pr_auc": 0.8931,
+        "roc_auc": 0.9897,
+        "tp": 259,
+        "fp": 43,
+        "tn": 2290,
+        "fn": 8,
+        "false_alerts_per_user_day": 0.4141,
+        "incident_recall": 1.0
+      }
+    }
+  }
+}

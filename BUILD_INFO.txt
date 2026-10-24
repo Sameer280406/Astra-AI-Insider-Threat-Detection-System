@@ -1,0 +1,3 @@
+Astra full-stack source with Containment & Forensics
+Source commit: 45ed2c7a78e54db579b875aaa4ea703154e77d39
+See README.md for Docker setup. See docs/VALIDATION.md for verified and unverified checks.

@@ -1,0 +1,144 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_DATA_DIR: /var/lib/zookeeper/data
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_MESSAGE_MAX_BYTES: 1048576
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  kafka-topics:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic cert-events --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic cert-features --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic cert-events-dlq --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+
+  backend:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_SCORING_ENABLED: ${KAFKA_SCORING_ENABLED:-false}
+      INTERNAL_INGEST_TOKEN: ${INTERNAL_INGEST_TOKEN:-}
+      SPARK_MASTER_URL: http://spark-master:8080
+
+  spark-master:
+    image: apache/spark:3.5.0
+    restart: unless-stopped
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+
+  spark-worker:
+    image: apache/spark:3.5.0
+    restart: unless-stopped
+    depends_on:
+      spark-master:
+        condition: service_started
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --cores
+      - "2"
+      - --memory
+      - 2G
+
+  spark-processor:
+    build:
+      context: .
+      dockerfile: services/Dockerfile.spark
+    restart: unless-stopped
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_started
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_CHECKPOINT_LOCATION=/var/lib/astra/spark-checkpoints/cert-feature-bridge
+      - KAFKA_STARTING_OFFSETS=${KAFKA_STARTING_OFFSETS:-latest}
+      - KAFKA_MAX_OFFSETS_PER_TRIGGER=${KAFKA_MAX_OFFSETS_PER_TRIGGER:-500}
+    volumes:
+      - spark_checkpoints:/var/lib/astra/spark-checkpoints
+    command:
+      - --master
+      - spark://spark-master:7077
+      - --packages
+      - org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0
+      - /opt/astra/spark_streaming.py
+
+  kafka-scorer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      INTERNAL_API_URL: http://backend:8000
+      INTERNAL_INGEST_TOKEN: ${INTERNAL_INGEST_TOKEN:?Set INTERNAL_INGEST_TOKEN to a random secret of at least 32 characters}
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS:-latest}
+      DATABASE_URL: postgresql+psycopg://astra_app:${APP_DB_PASSWORD}@postgres:5432/astra
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "app.services.kafka_worker"]
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+      spark-processor:
+        condition: service_started
+
+volumes:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  spark_checkpoints:
